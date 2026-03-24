@@ -491,11 +491,11 @@ function renderQuestionDetails() {
     html += `<div class="sq-card-header">`;
     // html += `<span class="sq-badge ${badge}">${escapeHtml(sq.qtype)}</span>`;
     html += `<strong>Question ${idx + 1}</strong>`;
-    html += `<span class="sq-type">Type: ${escapeHtml(getTypeLabel(sq.qtype))}</span>`;
-    html += `<span class="sq-weight">Weight: ${sq.weight}</span>`;
+    html += `<span class="sq-type"> Type: ${escapeHtml(getTypeLabel(sq.qtype))}</span>`;
+    html += `<span class="sq-weight"> Weight: ${sq.weight}</span>`;
     html += `</div>`;
 
-    html += `<table class="sq-table"><thead><tr><th>Answer</th><th style="text-align:right">Marks</th><th style="text-align:right">%</th><th>Feedback</th></tr></thead><tbody>`;
+    html += `<table class="sq-table"><thead><tr><th>Answer</th><th style="text-align:right">Marks</th><!--<th style="text-align:right">%</th>--><th>Feedback</th></tr></thead><tbody>`;
     sq.answers.forEach(a => {
       let cls = 'sq-wrong';
       if (a.percent >= 100) cls = 'sq-correct';
@@ -504,17 +504,43 @@ function renderQuestionDetails() {
       let answerText = escapeHtml(a.text === '*' ? '* (wildcard)' : a.text);
       if (isNumerical(sq.qtype) && a.tolerance > 0) answerText += ` \u00B1${a.tolerance}`;
 
-      const marks = (a.percent / 100 * sq.weight).toFixed(2);
+      const rawMarks = a.percent / 100 * sq.weight;
+      const marks = rawMarks % 1 === 0 ? rawMarks.toFixed(0) : rawMarks.toFixed(2);
       const pct = `${a.percent}%`;
       const fb = a.feedback ? escapeHtml(a.feedback) : '<span style="color:#aaa">No feedback</span>';
 
-      html += `<tr class="${cls}"><td>${answerText}</td><td class="sq-marks">${marks}</td><td class="sq-pct">${pct}</td><td class="sq-fb">${fb}</td></tr>`;
+      html += `<tr class="${cls}"><td>${answerText}</td><td class="sq-marks">${marks}</td><!--<td class="sq-pct">${pct}</td>--><td class="sq-fb">${fb}</td></tr>`;
     });
     html += `</tbody></table></div>`;
   });
 
+  html += `<div style="margin-top:.75rem"><button class="btn-secondary" onclick="copyDetailsForEmail()">Copy for Email</button></div>`;
+
   panel.innerHTML = html;
   panel.style.display = 'block';
+}
+
+function copyDetailsForEmail() {
+  const panel = document.getElementById('question-details');
+  // Clone and remove the copy button from the cloned content
+  const clone = panel.cloneNode(true);
+  clone.querySelectorAll('button').forEach(b => b.closest('div').remove());
+
+  const htmlContent = clone.innerHTML;
+  const blob = new Blob([htmlContent], { type: 'text/html' });
+  const plainText = clone.innerText;
+
+  navigator.clipboard.write([
+    new ClipboardItem({
+      'text/html': blob,
+      'text/plain': new Blob([plainText], { type: 'text/plain' })
+    })
+  ]).then(() => {
+    const btn = panel.querySelector('button');
+    const orig = btn.textContent;
+    btn.textContent = 'Copied!';
+    setTimeout(() => btn.textContent = orig, 1500);
+  });
 }
 
 /* ── Answer checking ── */
