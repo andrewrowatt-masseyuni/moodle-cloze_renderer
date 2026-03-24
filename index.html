@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Moodle Cloze Question Renderer</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    margin: 0; padding: 0;
+    background: #f5f5f5; color: #333;
+  }
+  header {
+    background: #ff7900; color: #fff;
+    padding: 1rem 2rem;
+    box-shadow: 0 2px 4px rgba(0,0,0,.15);
+  }
+  header h1 { margin: 0; font-size: 1.4rem; }
+  header p { margin: .25rem 0 0; font-size: .85rem; opacity: .9; }
+  .container { max-width: 960px; margin: 0 auto; padding: 1.5rem; }
+
+  /* Input area */
+  .input-area { background: #fff; border-radius: 8px; padding: 1.25rem; box-shadow: 0 1px 3px rgba(0,0,0,.1); margin-bottom: 1.5rem; }
+  .input-area label { font-weight: 600; display: block; margin-bottom: .5rem; }
+  .input-area textarea {
+    width: 100%; min-height: 180px; padding: .75rem; border: 1px solid #ccc; border-radius: 6px;
+    font-family: "Cascadia Code", "Fira Code", Consolas, monospace; font-size: .85rem;
+    resize: vertical;
+  }
+  .input-area textarea:focus { outline: none; border-color: #ff7900; box-shadow: 0 0 0 2px rgba(255,121,0,.25); }
+  .btn-row { display: flex; gap: .5rem; margin-top: .75rem; flex-wrap: wrap; }
+  button {
+    padding: .5rem 1.25rem; border: none; border-radius: 6px; font-size: .9rem; cursor: pointer;
+    font-weight: 600; transition: background .15s;
+  }
+  .btn-primary { background: #ff7900; color: #fff; }
+  .btn-primary:hover { background: #e06d00; }
+  .btn-secondary { background: #e0e0e0; color: #333; }
+  .btn-secondary:hover { background: #ccc; }
+  .btn-check { background: #4caf50; color: #fff; }
+  .btn-check:hover { background: #43a047; }
+
+  /* Rendered output */
+  #output {
+    background: #fff; border-radius: 8px; padding: 1.5rem; box-shadow: 0 1px 3px rgba(0,0,0,.1);
+    line-height: 1.8; font-size: 1rem; display: none;
+  }
+  #output p { margin: 0; }
+
+  /* Inline sub-question elements */
+  .cloze-input {
+    padding: 3px 6px; border: 2px solid #999; border-radius: 4px;
+    font-size: .95rem; font-family: inherit; vertical-align: baseline;
+  }
+  .cloze-input:focus { outline: none; border-color: #ff7900; }
+  .cloze-select {
+    padding: 3px 6px; border: 2px solid #999; border-radius: 4px;
+    font-size: .95rem; font-family: inherit; vertical-align: baseline;
+    background: #fff;
+  }
+
+  /* Radio / checkbox groups */
+  .cloze-mc-vertical { display: flex; flex-direction: column; gap: .15rem; margin: .35rem 0; padding-left: .5rem; border-left: 3px solid #ddd; }
+  .cloze-mc-horizontal { display: inline-flex; gap: 1rem; flex-wrap: wrap; margin: .15rem .25rem; vertical-align: middle; }
+  .cloze-mc-vertical label, .cloze-mc-horizontal label { cursor: pointer; display: flex; align-items: center; gap: .3rem; }
+
+  /* Feedback */
+  .feedback-icon {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 20px; height: 20px; border-radius: 50%; font-size: .75rem; font-weight: 700;
+    margin-left: 4px; cursor: pointer; vertical-align: middle; position: relative;
+  }
+  .feedback-correct { background: #c8e6c9; color: #2e7d32; }
+  .feedback-partial { background: #fff9c4; color: #f57f17; }
+  .feedback-incorrect { background: #ffcdd2; color: #c62828; }
+  .feedback-popup {
+    display: none; position: absolute; bottom: 130%; left: 50%; transform: translateX(-50%);
+    background: #fff; border: 1px solid #ccc; border-radius: 6px; padding: .5rem .75rem;
+    font-size: .8rem; font-weight: 400; white-space: nowrap; box-shadow: 0 2px 8px rgba(0,0,0,.15);
+    z-index: 100; min-width: 120px; max-width: 320px; white-space: normal; text-align: left;
+  }
+  .feedback-icon:hover .feedback-popup,
+  .feedback-icon:focus .feedback-popup { display: block; }
+  .feedback-popup strong { display: block; margin-bottom: .2rem; }
+
+  .cloze-input.correct { border-color: #4caf50; background: #e8f5e9; }
+  .cloze-input.incorrect { border-color: #e53935; background: #ffebee; }
+  .cloze-input.partial { border-color: #ff9800; background: #fff8e1; }
+  .cloze-select.correct { border-color: #4caf50; background: #e8f5e9; }
+  .cloze-select.incorrect { border-color: #e53935; background: #ffebee; }
+  .cloze-select.partial { border-color: #ff9800; background: #fff8e1; }
+  .cloze-mc-vertical.correct, .cloze-mc-horizontal.correct { border-color: #4caf50; }
+  .cloze-mc-vertical.incorrect, .cloze-mc-horizontal.incorrect { border-color: #e53935; }
+  .cloze-mc-vertical.partial, .cloze-mc-horizontal.partial { border-color: #ff9800; }
+
+  /* Score bar */
+  .score-bar {
+    margin-top: 1rem; padding: .75rem 1rem; border-radius: 6px;
+    background: #e3f2fd; font-weight: 600; font-size: .95rem; display: none;
+  }
+
+  /* Example button */
+  .example-list { margin-top: .5rem; }
+  .example-list summary { cursor: pointer; font-size: .85rem; color: #666; }
+  .example-list pre {
+    background: #f8f8f8; border: 1px solid #ddd; border-radius: 6px;
+    padding: .75rem; font-size: .8rem; white-space: pre-wrap; word-break: break-word;
+    margin: .5rem 0;
+  }
+  .example-list button { font-size: .8rem; padding: .3rem .75rem; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Moodle Cloze (Embedded Answers) Renderer</h1>
+  <p>Paste Moodle Cloze question text below and click Render to preview it interactively.</p>
+</header>
+
+<div class="container">
+  <div class="input-area">
+    <label for="cloze-input">Cloze Question Text</label>
+    <textarea id="cloze-input" placeholder="Paste your Moodle Cloze question text here..."></textarea>
+    <div class="btn-row">
+      <button class="btn-primary" onclick="renderQuestion()">Render</button>
+      <button class="btn-check" onclick="checkAnswers()" id="btn-check" style="display:none">Check Answers</button>
+      <button class="btn-secondary" onclick="resetAll()">Clear</button>
+    </div>
+
+    <details class="example-list">
+      <summary>Load an example</summary>
+      <p><button class="btn-secondary" onclick="loadExample(1)">Example 1 &ndash; Cities &amp; capitals</button>
+         <button class="btn-secondary" onclick="loadExample(2)">Example 2 &ndash; Mixed types</button></p>
+      <pre id="example-preview"></pre>
+    </details>
+  </div>
+
+  <div id="output"></div>
+  <div class="score-bar" id="score-bar"></div>
+</div>
+
+<script>
+const EXAMPLES = {
+  1: `Match the following cities with the correct state:
+* San Francisco: {1:MULTICHOICE:=California#OK~Arizona#Wrong}
+* Tucson: {1:MULTICHOICE:California#Wrong~%100%Arizona#OK}
+* Los Angeles: {1:MULTICHOICE:=California#OK~Arizona#Wrong}
+* Phoenix: {1:MULTICHOICE:%0%California#Wrong~=Arizona#OK}
+
+The capital of France is {1:SHORTANSWER:%100%Paris#Congratulations!~%50%Marseille#No, that is the second largest city in France (after Paris).~*#Wrong answer. The capital of France is Paris, of course.}.`,
+
+  2: `This question consists of some text with an answer embedded right here {1:MULTICHOICE:Wrong answer#Feedback for this wrong answer~Another wrong answer#Feedback for the other wrong answer~=Correct answer#Feedback for correct answer~%50%Answer that gives half the credit#Feedback for half credit answer} and right after that you will have to deal with this short answer {1:SHORTANSWER:Wrong answer#Feedback for this wrong answer~=Correct answer#Feedback for correct answer~%50%Answer that gives half the credit#Feedback for half credit answer} and finally we have a floating point number {2:NUMERICAL:=23.8:0.1#Feedback for correct answer 23.8~%50%23.8:2#Feedback for half credit near correct answer}.
+
+The multichoice question can also be shown in the vertical display {2:MCV:1. Wrong answer#Feedback for this wrong answer~2. Another wrong answer#Feedback for the other wrong answer~=3. Correct answer#Feedback for correct answer~%50%4. Answer that gives half the credit#Feedback for half credit answer}
+
+Or in a horizontal display {2:MCH:a. Wrong answer#Feedback for this wrong answer~b. Another wrong answer#Feedback for the other wrong answer~=c. Correct answer#Feedback for correct answer~%50%d. Answer that gives half the credit#Feedback for half credit answer}
+
+A shortanswer question where case must match. Write moodle in upper case letters {1:SHORTANSWER_C:moodle#Feedback for moodle in lower case~=MOODLE#Feedback for MOODLE in upper case~%50%Moodle#Feedback for only first letter in upper case}
+
+a) How good is this? {:MULTICHOICE:=Yes#Correct~No#We have a different opinion}
+b) What grade would you give it? {3:NUMERICAL:=3:2}`
+};
+
+function loadExample(n) {
+  document.getElementById('cloze-input').value = EXAMPLES[n];
+  document.getElementById('example-preview').textContent = EXAMPLES[n];
+}
+
+/* ── Cloze parser ── */
+
+const TYPE_ALIASES = {
+  'MULTICHOICE': 'MC', 'MC': 'MC',
+  'MULTICHOICE_V': 'MCV', 'MCV': 'MCV',
+  'MULTICHOICE_H': 'MCH', 'MCH': 'MCH',
+  'MULTICHOICE_S': 'MCS', 'MCS': 'MCS',
+  'MULTICHOICE_VS': 'MCVS', 'MCVS': 'MCVS',
+  'MULTICHOICE_HS': 'MCHS', 'MCHS': 'MCHS',
+  'MULTIRESPONSE': 'MR', 'MR': 'MR',
+  'MULTIRESPONSE_H': 'MRH', 'MRH': 'MRH',
+  'MULTIRESPONSE_S': 'MRS', 'MRS': 'MRS',
+  'MULTIRESPONSE_HS': 'MRHS', 'MRHS': 'MRHS',
+  'SHORTANSWER': 'SA', 'SA': 'SA', 'MW': 'SA',
+  'SHORTANSWER_C': 'SAC', 'SAC': 'SAC', 'MWC': 'SAC',
+  'NUMERICAL': 'NM', 'NM': 'NM',
+};
+
+function isMultichoice(t) { return ['MC','MCS','MCV','MCVS','MCH','MCHS'].includes(t); }
+function isMultiresponse(t) { return ['MR','MRS','MRH','MRHS'].includes(t); }
+function isVertical(t) { return ['MCV','MCVS','MR','MRS'].includes(t); }
+function isHorizontal(t) { return ['MCH','MCHS','MRH','MRHS'].includes(t); }
+function isDropdown(t) { return ['MC','MCS'].includes(t); }
+function isShortAnswer(t) { return ['SA','SAC'].includes(t); }
+function isNumerical(t) { return t === 'NM'; }
+function isShuffle(t) { return ['MCS','MCVS','MCHS','MRS','MRHS'].includes(t); }
+
+// Tokenize answers respecting escaped characters
+function splitAnswers(raw) {
+  const answers = [];
+  let current = '';
+  let i = 0;
+  while (i < raw.length) {
+    if (raw[i] === '\\' && i + 1 < raw.length) {
+      current += raw[i + 1];
+      i += 2;
+    } else if (raw[i] === '~') {
+      answers.push(current);
+      current = '';
+      i++;
+    } else {
+      current += raw[i];
+      i++;
+    }
+  }
+  answers.push(current);
+  return answers;
+}
+
+function parseAnswer(str, qtype) {
+  let text = str, feedback = '', percent = 0;
+
+  // Split on unescaped #
+  const hashIdx = findUnescaped(str, '#');
+  if (hashIdx !== -1) {
+    feedback = str.slice(hashIdx + 1);
+    text = str.slice(0, hashIdx);
+  }
+
+  // Determine score
+  if (text.startsWith('=')) {
+    percent = 100;
+    text = text.slice(1);
+  } else if (text.startsWith('*')) {
+    percent = 0;
+    text = text.slice(1) || '*';
+  } else {
+    const m = text.match(/^%(-?\d+(?:\.\d+)?)%/);
+    if (m) {
+      percent = parseFloat(m[1]);
+      text = text.slice(m[0].length);
+    }
+  }
+
+  // For NUMERICAL: parse tolerance
+  let tolerance = 0;
+  if (isNumerical(qtype)) {
+    const ti = text.indexOf(':');
+    if (ti !== -1) {
+      tolerance = parseFloat(text.slice(ti + 1)) || 0;
+      text = text.slice(0, ti);
+    }
+  }
+
+  return { text: text.trim(), feedback, percent, tolerance };
+}
+
+function findUnescaped(str, ch) {
+  for (let i = 0; i < str.length; i++) {
+    if (str[i] === '\\') { i++; continue; }
+    if (str[i] === ch) return i;
+  }
+  return -1;
+}
+
+// Find matching closing brace respecting escapes
+function findClosingBrace(text, start) {
+  let depth = 0;
+  for (let i = start; i < text.length; i++) {
+    if (text[i] === '\\') { i++; continue; }
+    if (text[i] === '{') depth++;
+    if (text[i] === '}') { depth--; if (depth === 0) return i; }
+  }
+  return -1;
+}
+
+function parseSubQuestions(text) {
+  const parts = [];
+  let lastIdx = 0;
+  let i = 0;
+  while (i < text.length) {
+    if (text[i] === '\\' && i + 1 < text.length) { i += 2; continue; }
+    if (text[i] === '{') {
+      const close = findClosingBrace(text, i);
+      if (close === -1) { i++; continue; }
+      const inner = text.slice(i + 1, close);
+
+      // Try to parse as cloze sub-question: {weight:TYPE:answers}
+      const m = inner.match(/^(\d*)\s*:([\w_]+)\s*:([\s\S]*)$/);
+      if (m) {
+        const typeKey = m[2].toUpperCase();
+        const norm = TYPE_ALIASES[typeKey];
+        if (norm) {
+          // Push preceding text
+          if (i > lastIdx) parts.push({ type: 'text', content: text.slice(lastIdx, i) });
+          const weight = m[1] ? parseInt(m[1], 10) : 1;
+          const answersRaw = splitAnswers(m[3].replace(/\n/g, ' '));
+          const answers = answersRaw.map(a => parseAnswer(a, norm));
+          parts.push({ type: 'subq', qtype: norm, weight, answers });
+          lastIdx = close + 1;
+          i = lastIdx;
+          continue;
+        }
+      }
+      i = close + 1;
+    } else {
+      i++;
+    }
+  }
+  if (lastIdx < text.length) parts.push({ type: 'text', content: text.slice(lastIdx) });
+  return parts;
+}
+
+/* ── Rendering ── */
+
+let subQuestions = []; // live references for checking
+let sqCounter = 0;
+
+function escapeHtml(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// Allow basic HTML in answer text (images, sup, sub, br, etc.)
+function renderAnswerHtml(s) {
+  // The answer text may contain HTML like <img>, <sup>, etc. We pass it through.
+  return s;
+}
+
+function shuffle(arr) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function renderSubQuestion(sq) {
+  const id = sqCounter++;
+  sq._id = id;
+  subQuestions.push(sq);
+
+  const { qtype, answers } = sq;
+  const displayAnswers = isShuffle(qtype) ? shuffle(answers) : answers;
+  sq._displayAnswers = displayAnswers;
+
+  if (isDropdown(qtype)) {
+    // Dropdown <select>
+    let html = `<select class="cloze-select" data-sq="${id}"><option value="">Choose...</option>`;
+    displayAnswers.forEach((a, i) => {
+      html += `<option value="${i}">${escapeHtml(a.text)}</option>`;
+    });
+    html += '</select>';
+    return html;
+  }
+
+  if (isVertical(qtype) || isHorizontal(qtype)) {
+    const dir = isVertical(qtype) ? 'vertical' : 'horizontal';
+    const inputType = isMultiresponse(qtype) ? 'checkbox' : 'radio';
+    const name = `sq_${id}`;
+    let html = `<span class="cloze-mc-${dir}" data-sq="${id}">`;
+    displayAnswers.forEach((a, i) => {
+      html += `<label><input type="${inputType}" name="${name}" value="${i}"> ${renderAnswerHtml(a.text)}</label>`;
+    });
+    html += '</span>';
+    return html;
+  }
+
+  if (isShortAnswer(qtype) || isNumerical(qtype)) {
+    // Compute size from longest answer
+    const maxLen = Math.max(...answers.map(a => a.text.length), 4);
+    const size = maxLen + Math.floor(Math.random() * Math.max(1, Math.round(maxLen * 0.15)));
+    return `<input type="text" class="cloze-input" data-sq="${id}" size="${size}">`;
+  }
+
+  return `<span>[unknown type: ${qtype}]</span>`;
+}
+
+function renderQuestion() {
+  const raw = document.getElementById('cloze-input').value;
+  if (!raw.trim()) return;
+
+  subQuestions = [];
+  sqCounter = 0;
+
+  const parts = parseSubQuestions(raw);
+
+  // Convert text parts: preserve line breaks, basic formatting
+  let html = '';
+  parts.forEach(p => {
+    if (p.type === 'text') {
+      // Convert newlines to <br>, preserve basic formatting
+      html += escapeHtml(p.content).replace(/\n/g, '<br>');
+    } else {
+      html += renderSubQuestion(p);
+    }
+  });
+
+  const output = document.getElementById('output');
+  output.innerHTML = html;
+  output.style.display = 'block';
+  document.getElementById('btn-check').style.display = 'inline-block';
+  document.getElementById('score-bar').style.display = 'none';
+
+  // Remove old feedback icons
+  document.querySelectorAll('.feedback-icon').forEach(el => el.remove());
+}
+
+/* ── Answer checking ── */
+
+function getUserAnswer(sq) {
+  const id = sq._id;
+  const qtype = sq.qtype;
+
+  if (isDropdown(qtype)) {
+    const sel = document.querySelector(`select[data-sq="${id}"]`);
+    const val = sel ? sel.value : '';
+    return val === '' ? null : sq._displayAnswers[parseInt(val, 10)];
+  }
+
+  if (isVertical(qtype) || isHorizontal(qtype)) {
+    if (isMultiresponse(qtype)) {
+      const checks = document.querySelectorAll(`span[data-sq="${id}"] input:checked`);
+      return Array.from(checks).map(c => sq._displayAnswers[parseInt(c.value, 10)]);
+    } else {
+      const checked = document.querySelector(`span[data-sq="${id}"] input:checked`);
+      return checked ? sq._displayAnswers[parseInt(checked.value, 10)] : null;
+    }
+  }
+
+  if (isShortAnswer(qtype) || isNumerical(qtype)) {
+    const inp = document.querySelector(`input[data-sq="${id}"]`);
+    return inp ? inp.value : '';
+  }
+  return null;
+}
+
+function matchAnswer(userVal, sq) {
+  const { qtype, answers } = sq;
+
+  if (isMultiresponse(qtype)) {
+    // userVal is an array of selected answer objects
+    if (!userVal || userVal.length === 0) return { percent: 0, feedback: '', answer: null };
+    let totalPercent = 0;
+    let feedbacks = [];
+    userVal.forEach(a => {
+      totalPercent += a.percent;
+      if (a.feedback) feedbacks.push(a.feedback);
+    });
+    return { percent: Math.max(0, Math.min(100, totalPercent)), feedback: feedbacks.join('; '), answer: userVal };
+  }
+
+  if (isDropdown(qtype) || isVertical(qtype) || isHorizontal(qtype)) {
+    // userVal is the chosen answer object
+    if (!userVal) return { percent: 0, feedback: '', answer: null };
+    return { percent: userVal.percent, feedback: userVal.feedback, answer: userVal };
+  }
+
+  if (isShortAnswer(qtype)) {
+    const input = (userVal || '').trim();
+    if (!input) return { percent: 0, feedback: '', answer: null };
+    const caseSensitive = qtype === 'SAC';
+
+    for (const a of answers) {
+      if (a.text === '*') {
+        return { percent: a.percent, feedback: a.feedback, answer: a };
+      }
+      const aText = a.text;
+      if (caseSensitive ? input === aText : input.toLowerCase() === aText.toLowerCase()) {
+        return { percent: a.percent, feedback: a.feedback, answer: a };
+      }
+    }
+    // Check wildcard at end
+    const wild = answers.find(a => a.text === '*');
+    if (wild) return { percent: wild.percent, feedback: wild.feedback, answer: wild };
+    return { percent: 0, feedback: '', answer: null };
+  }
+
+  if (isNumerical(qtype)) {
+    const input = (userVal || '').trim().replace(',', '.');
+    const num = parseFloat(input);
+    if (isNaN(num)) {
+      const wild = answers.find(a => a.text === '*');
+      if (wild) return { percent: wild.percent, feedback: wild.feedback, answer: wild };
+      return { percent: 0, feedback: '', answer: null };
+    }
+    // Find best matching answer (highest percent)
+    let best = null;
+    for (const a of answers) {
+      if (a.text === '*') continue;
+      const target = parseFloat(a.text.replace(',', '.'));
+      if (isNaN(target)) continue;
+      if (Math.abs(num - target) <= a.tolerance + 1e-9) {
+        if (!best || a.percent > best.percent) best = a;
+      }
+    }
+    if (best) return { percent: best.percent, feedback: best.feedback, answer: best };
+    const wild = answers.find(a => a.text === '*');
+    if (wild) return { percent: wild.percent, feedback: wild.feedback, answer: wild };
+    return { percent: 0, feedback: '', answer: null };
+  }
+
+  return { percent: 0, feedback: '', answer: null };
+}
+
+function addFeedbackIcon(element, result, correctText) {
+  // Remove existing
+  const existing = element.nextElementSibling;
+  if (existing && existing.classList.contains('feedback-icon')) existing.remove();
+
+  const pct = result.percent;
+  const cls = pct >= 100 ? 'feedback-correct' : pct > 0 ? 'feedback-partial' : 'feedback-incorrect';
+  const symbol = pct >= 100 ? '\u2713' : pct > 0 ? '\u00BD' : '\u2717';
+
+  const icon = document.createElement('span');
+  icon.className = `feedback-icon ${cls}`;
+  icon.tabIndex = 0;
+  icon.innerHTML = symbol;
+
+  let popupHtml = '';
+  if (result.feedback) popupHtml += `<div>${result.feedback}</div>`;
+  if (pct < 100 && correctText) popupHtml += `<div style="margin-top:.3rem;color:#2e7d32"><strong>Correct answer:</strong> ${correctText}</div>`;
+  if (pct >= 0) popupHtml += `<div style="margin-top:.2rem;font-style:italic">Score: ${pct}%</div>`;
+
+  if (popupHtml) {
+    const popup = document.createElement('span');
+    popup.className = 'feedback-popup';
+    popup.innerHTML = popupHtml;
+    icon.appendChild(popup);
+  }
+
+  element.insertAdjacentElement('afterend', icon);
+}
+
+function checkAnswers() {
+  let totalWeightedScore = 0;
+  let totalWeight = 0;
+
+  subQuestions.forEach(sq => {
+    const id = sq._id;
+    const userVal = getUserAnswer(sq);
+    const result = matchAnswer(userVal, sq);
+    const pct = result.percent;
+
+    totalWeightedScore += (pct / 100) * sq.weight;
+    totalWeight += sq.weight;
+
+    // Find correct answer text
+    let correctText = '';
+    const correct = sq.answers.filter(a => a.percent >= 100);
+    if (correct.length) correctText = correct.map(a => escapeHtml(a.text)).join(' / ');
+
+    // Style the element
+    const cls = pct >= 100 ? 'correct' : pct > 0 ? 'partial' : 'incorrect';
+
+    if (isDropdown(sq.qtype)) {
+      const el = document.querySelector(`select[data-sq="${id}"]`);
+      if (el) { el.className = `cloze-select ${cls}`; addFeedbackIcon(el, result, correctText); }
+    } else if (isVertical(sq.qtype) || isHorizontal(sq.qtype)) {
+      const el = document.querySelector(`span[data-sq="${id}"]`);
+      if (el) { el.classList.remove('correct','incorrect','partial'); el.classList.add(cls); addFeedbackIcon(el, result, correctText); }
+    } else {
+      const el = document.querySelector(`input[data-sq="${id}"]`);
+      if (el) { el.className = `cloze-input ${cls}`; addFeedbackIcon(el, result, correctText); }
+    }
+  });
+
+  // Show score
+  const scorePct = totalWeight > 0 ? Math.round((totalWeightedScore / totalWeight) * 100) : 0;
+  const bar = document.getElementById('score-bar');
+  bar.textContent = `Score: ${totalWeightedScore.toFixed(2)} / ${totalWeight.toFixed(2)} (${scorePct}%)`;
+  bar.style.display = 'block';
+  bar.style.background = scorePct >= 80 ? '#c8e6c9' : scorePct >= 50 ? '#fff9c4' : '#ffcdd2';
+}
+
+function resetAll() {
+  document.getElementById('cloze-input').value = '';
+  document.getElementById('output').innerHTML = '';
+  document.getElementById('output').style.display = 'none';
+  document.getElementById('btn-check').style.display = 'none';
+  document.getElementById('score-bar').style.display = 'none';
+  subQuestions = [];
+  sqCounter = 0;
+}
+</script>
+</body>
+</html>
