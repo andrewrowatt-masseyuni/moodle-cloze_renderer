@@ -94,9 +94,12 @@
   .cloze-mc-vertical.incorrect, .cloze-mc-horizontal.incorrect { border-color: #e53935; }
   .cloze-mc-vertical.partial, .cloze-mc-horizontal.partial { border-color: #ff9800; }
 
-  /* Score bar */
+  /* Check + Score row */
+  .check-row {
+    display: flex; align-items: center; gap: 1rem; margin-top: 1rem; flex-wrap: wrap; display: none;
+  }
   .score-bar {
-    margin-top: 1rem; padding: .75rem 1rem; border-radius: 6px;
+    padding: .5rem 1rem; border-radius: 6px;
     background: #e3f2fd; font-weight: 600; font-size: .95rem; display: none;
   }
 
@@ -145,6 +148,7 @@
 <header>
   <h1>Moodle Cloze (Embedded Answers) Renderer</h1>
   <p>Paste Moodle Cloze question text below and click Render to preview it interactively.</p>
+  <p>Ref: <a target="_blank" href="https://docs.moodle.org/405/en/Embedded_Answers_(Cloze)_question_type">Embedded Answers (Cloze) question type - MoodleDocs</a></p>
 </header>
 
 <div class="container">
@@ -153,7 +157,6 @@
     <textarea id="cloze-input" placeholder="Paste your Moodle Cloze question text here..."></textarea>
     <div class="btn-row">
       <button class="btn-primary" onclick="renderQuestion()">Render</button>
-      <button class="btn-check" onclick="checkAnswers()" id="btn-check" style="display:none">Check Answers</button>
       <button class="btn-secondary" onclick="resetAll()">Clear</button>
     </div>
 
@@ -165,9 +168,15 @@
     </details>
   </div>
 
+  <div id="marked-out-of" style="display:none; font-weight:600; font-size:.95rem; color:#555; margin-bottom:.5rem;"></div>
   <div id="output"></div>
+  <div class="check-row" id="check-row">
+    <button class="btn-check" onclick="checkAnswers()" id="btn-check">Check Answers</button>
+    <button class="btn-secondary" onclick="fillCorrect()" id="btn-fill">Fill in Correct Responses</button>
+    <button class="btn-secondary" onclick="renderQuestion()" id="btn-clear-answers">Clear Answers</button>
+    <div class="score-bar" id="score-bar"></div>
+  </div>
   <div id="question-details"></div>
-  <div class="score-bar" id="score-bar"></div>
 </div>
 
 <script>
@@ -195,6 +204,8 @@ b) What grade would you give it? {3:NUMERICAL:=3:2}`
 function loadExample(n) {
   document.getElementById('cloze-input').value = EXAMPLES[n];
   document.getElementById('example-preview').textContent = EXAMPLES[n];
+  document.querySelector('.example-list').removeAttribute('open');
+  renderQuestion();
 }
 
 /* ── Cloze parser ── */
@@ -428,11 +439,17 @@ function renderQuestion() {
   const output = document.getElementById('output');
   output.innerHTML = html;
   output.style.display = 'block';
-  document.getElementById('btn-check').style.display = 'inline-block';
+  document.getElementById('check-row').style.display = 'flex';
   document.getElementById('score-bar').style.display = 'none';
 
   // Remove old feedback icons
   document.querySelectorAll('.feedback-icon').forEach(el => el.remove());
+
+  // Show "Marked out of" above render panel
+  const totalMarks = subQuestions.reduce((sum, sq) => sum + sq.weight, 0);
+  const markedEl = document.getElementById('marked-out-of');
+  markedEl.textContent = `Marked out of ${totalMarks.toFixed(2)}`;
+  markedEl.style.display = 'block';
 
   renderQuestionDetails();
 }
@@ -462,7 +479,8 @@ function renderQuestionDetails() {
   const panel = document.getElementById('question-details');
   if (subQuestions.length === 0) { panel.style.display = 'none'; return; }
 
-  let html = '<h3>Sub-question Breakdown</h3>';
+  const totalMarks = subQuestions.reduce((sum, sq) => sum + sq.weight, 0);
+  let html = `<h3>Marked out of ${totalMarks.toFixed(2)}</h3>`;
   subQuestions.forEach((sq, idx) => {
     const badge = getTypeBadgeClass(sq.qtype);
     html += `<div class="sq-card">`;
@@ -477,14 +495,15 @@ function renderQuestionDetails() {
     sq.answers.forEach(a => {
       let cls = 'sq-wrong';
       let tag = '';
-      if (a.percent >= 100) { cls = 'sq-correct'; tag = ' \u2713'; }
-      else if (a.percent > 0) { cls = 'sq-partial'; tag = ` (${a.percent}%)`; }
+      if (a.percent >= 100) { cls = 'sq-correct'; tag = ` (${a.percent}% = ${(a.percent / 100 * sq.weight).toFixed(2)} marks)`; }
+      else if (a.percent > 0) { cls = 'sq-partial'; tag = ` (${a.percent}% = ${(a.percent / 100 * sq.weight).toFixed(2)} marks)`; }
 
       let label = escapeHtml(a.text === '*' ? '* (wildcard)' : a.text);
       if (isNumerical(sq.qtype) && a.tolerance > 0) label += ` \u00B1${a.tolerance}`;
-      if (a.feedback) label += ` &mdash; <em>${escapeHtml(a.feedback)}</em>`;
+      label += tag;
+      label += a.feedback ? ` &mdash; <em>Feedback: ${escapeHtml(a.feedback)}</em>` : ` &mdash; <em style="color:#aaa">No feedback</em>`;
 
-      html += `<li class="${cls}">${label}${tag}</li>`;
+      html += `<li class="${cls}">${label}</li>`;
     });
     html += `</ul></div>`;
   });
@@ -660,14 +679,50 @@ function checkAnswers() {
   bar.style.background = scorePct >= 80 ? '#c8e6c9' : scorePct >= 50 ? '#fff9c4' : '#ffcdd2';
 }
 
+function fillCorrect() {
+  subQuestions.forEach(sq => {
+    const id = sq._id;
+    const qtype = sq.qtype;
+    const best = sq.answers.reduce((a, b) => b.percent > a.percent ? b : a, sq.answers[0]);
+
+    if (isDropdown(qtype)) {
+      const sel = document.querySelector(`select[data-sq="${id}"]`);
+      if (sel) {
+        const idx = sq._displayAnswers.indexOf(best);
+        if (idx !== -1) sel.value = String(idx);
+      }
+    } else if (isVertical(qtype) || isHorizontal(qtype)) {
+      if (isMultiresponse(qtype)) {
+        // Check all answers with positive percent
+        const inputs = document.querySelectorAll(`span[data-sq="${id}"] input`);
+        inputs.forEach(inp => {
+          const a = sq._displayAnswers[parseInt(inp.value, 10)];
+          inp.checked = a && a.percent > 0;
+        });
+      } else {
+        const idx = sq._displayAnswers.indexOf(best);
+        if (idx !== -1) {
+          const inp = document.querySelector(`span[data-sq="${id}"] input[value="${idx}"]`);
+          if (inp) inp.checked = true;
+        }
+      }
+    } else if (isShortAnswer(qtype) || isNumerical(qtype)) {
+      const inp = document.querySelector(`input[data-sq="${id}"]`);
+      if (inp && best.text !== '*') inp.value = best.text;
+    }
+  });
+  checkAnswers();
+}
+
 function resetAll() {
   document.getElementById('cloze-input').value = '';
   document.getElementById('output').innerHTML = '';
   document.getElementById('output').style.display = 'none';
-  document.getElementById('btn-check').style.display = 'none';
+  document.getElementById('check-row').style.display = 'none';
   document.getElementById('score-bar').style.display = 'none';
   document.getElementById('question-details').innerHTML = '';
   document.getElementById('question-details').style.display = 'none';
+  document.getElementById('marked-out-of').style.display = 'none';
   subQuestions = [];
   sqCounter = 0;
 }
