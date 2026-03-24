@@ -125,7 +125,7 @@
   .sq-badge-sa { background: #26a69a; }
   .sq-badge-nm { background: #ef5350; }
   .sq-badge-mr { background: #7e57c2; }
-  .sq-weight { font-size: .8rem; color: #888; }
+  .sq-weight, .sq-type { color: #888; }
   .sq-answers { margin: .25rem 0 0 .25rem; font-size: .85rem; }
   .sq-answers li { margin-bottom: .15rem; }
   .sq-answers .sq-correct { color: #2e7d32; font-weight: 600; }
@@ -485,10 +485,10 @@ function renderQuestionDetails() {
     const badge = getTypeBadgeClass(sq.qtype);
     html += `<div class="sq-card">`;
     html += `<div class="sq-card-header">`;
-    html += `<span class="sq-badge ${badge}">${escapeHtml(sq.qtype)}</span>`;
+    // html += `<span class="sq-badge ${badge}">${escapeHtml(sq.qtype)}</span>`;
     html += `<strong>Question ${idx + 1}</strong>`;
+    html += `<span class="sq-type">Type: ${escapeHtml(getTypeLabel(sq.qtype))}</span>`;
     html += `<span class="sq-weight">Weight: ${sq.weight}</span>`;
-    html += `<span style="font-size:.8rem;color:#777">&mdash; ${escapeHtml(getTypeLabel(sq.qtype))}</span>`;
     html += `</div>`;
 
     html += `<ul class="sq-answers">`;
